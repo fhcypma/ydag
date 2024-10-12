@@ -1,0 +1,42 @@
+[tool.poetry]
+name = "ypoetry dag"
+version = "0.0.1"
+description = ""
+authors = ["Frank Ypma <frank.ypma@ypma-data.nl>"]
+readme = "README.md"
+
+[tool.semantic_release]
+version_variable = [
+    "ydag/__init__.py:__version__",
+    "pyproject.toml:version"
+]
+branch = "main"
+upload_to_pypi = false
+upload_to_release = true
+
+[tool.commitizen]
+name = "cz_conventional_commits"
+tag_format = "$version"
+version_scheme = "semver2"
+version_provider = "poetry"
+update_changelog_on_bump = true
+major_version_zero = true
+
+[tool.poetry.dependencies]
+python = "^3.11"
+jinja2 = "^3.1"
+networkx = "^3.3"
+
+[tool.poetry.group.dev.dependencies]
+python-semantic-release = "*"
+pre-commit = "*"
+commitizen = "^3.29.1"
+
+[tool.poetry.group.test.dependencies]
+pytest = "*"
+mypy = "*"
+networkx-stubs = "*"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
