@@ -10,7 +10,7 @@ from typing import List, Dict, Generic, TypeVar, Callable
 
 import networkx as nx
 
-from ydag.trigger import Trigger, State
+from ydag.deprecated.it1.trigger import Trigger, State
 
 
 class DagFailedError(RuntimeError):
@@ -335,7 +335,7 @@ class DagRun(Generic[InputType]):
     def input(self):
         return self._input
 
-    async def _execute(self):
+    async def _execute(self) -> None:
         self._log.info(f"Starting dag {self._dag.id}")
         self.state = State.RUNNING
         self.task_instances: Dict[str, TaskInstance] = {

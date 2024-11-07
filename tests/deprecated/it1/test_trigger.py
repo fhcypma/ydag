@@ -1,4 +1,4 @@
-from ydag.dag import State, Trigger
+from ydag.deprecated.it1.dag import State, Trigger
 
 
 class TestTrigger:
