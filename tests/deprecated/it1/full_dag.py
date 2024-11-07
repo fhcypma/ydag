@@ -2,7 +2,7 @@ import asyncio
 import logging
 from datetime import datetime
 
-from ydag.dag import Dag, Task, TaskResult, DagInput
+from ydag.deprecated.it1.dag import Dag, Task, TaskResult, DagInput
 
 
 logging.basicConfig(
