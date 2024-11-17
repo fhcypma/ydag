@@ -1,6 +1,21 @@
 # CHANGELOG
 
 
+## v0.3.0 (2024-11-17)
+
+### Chores
+
+* chore: removed black, updated precommit versions (#5)
+
+Co-authored-by: Frank Ypma <frank.ypma@ypma-data.nl> ([`fac401d`](https://github.com/fhcypma/ydag/commit/fac401de7686b2f23a03c6d02e05527fa46caa68))
+
+### Features
+
+* feat: added dagrun and stateless tasks (#6)
+
+Co-authored-by: Frank Ypma <frank.ypma@ypma-data.nl> ([`9af9dfc`](https://github.com/fhcypma/ydag/commit/9af9dfc96dc85a1376daf6442375f5e22301aa07))
+
+
 ## v0.2.0 (2024-11-07)
 
 ### Features
