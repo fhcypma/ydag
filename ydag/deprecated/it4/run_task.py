@@ -2,7 +2,7 @@ import asyncio
 import logging
 import time
 
-from ydag.task import Task
+from ydag.deprecated.it4.task import Task
 
 
 logging.basicConfig(level=logging.DEBUG)
@@ -40,8 +40,10 @@ tf = one.transform(lambda x: x + 1)
 wait2sec = WaitTask(id="wait2sec", delay=tf)
 final = DoNothingTask(id="final", wait_on=[wait1sec, wait2sec])
 
-res = final.run_sync()
+run = final.run_sync()
 toc = time.time()
+
+res = run.get_result(final)
 if res.error:
     raise res.error
 print(f"Result is {res.value}")
