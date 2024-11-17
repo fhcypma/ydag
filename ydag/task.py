@@ -1,187 +1,203 @@
 import asyncio
 import inspect
 import logging
-from abc import ABC, abstractmethod
+from abc import abstractmethod, ABC
 from dataclasses import dataclass
 from enum import Enum
-from typing import Generic, TypeVar, Callable, Dict, Any, List
-from uuid import UUID, uuid4
-
-InputType = TypeVar("InputType")
-OutputType = TypeVar("OutputType")
-TransformedType = TypeVar("TransformedType")
+from typing import Any, Dict, TypeAlias
+from typing import Generic, List
+from typing import TypeVar
+from uuid import uuid4
 
 
 class State(Enum):
     CREATED = 0
     WAITING = (1,)
     RUNNING = (2,)
-    # SKIPPED = (3,)
+    SKIPPED = (3,)
     SUCCEEDED = (4,)
     FAILED = (5,)
     UPSTREAM_FAILED = (6,)
-    # UPSTREAM_SKIPPED = (7,)
+    UPSTREAM_SKIPPED = (7,)
 
 
-FAILED_STATES = [State.FAILED, State.UPSTREAM_FAILED]
-FINAL_STATES = [State.SUCCEEDED] + FAILED_STATES
+OutputType = TypeVar("OutputType")
 
 
 @dataclass
-class Result(Generic[OutputType]):
+class TaskResult(Generic[OutputType]):
     """Outcome of a runnable class"""
 
+    state: State = State.CREATED
     value: OutputType | None = None
     error: BaseException | None = None
 
 
-class EmptyOutput:
-    """Should use this as task definition without output instead of None"""
+class DagRun:
+    """Class to hold all task state and results"""
 
-    pass
+    def __init__(self):
+        self._run_id = uuid4()
+        self._running_tasks: Dict[Task, Any] = {}
+        self._results: Dict[Task, TaskResult] = {}
 
+    async def run(self, task: "Task[OutputType]") -> None:
+        """
+        Run a task and store the result in the dag run
+        """
+        logging.debug(f"{self._run_id} - Running task {task.id}")
 
-class RunError(RuntimeError):
-    pass
+        # Task was already completed
+        if task in self._results.keys():
+            logging.debug(f"{self._run_id} - Task {task.id} already completed")
+            return
+
+        # Task was already started
+        if task in self._running_tasks.keys():
+            logging.debug(f"{self._run_id} - Task {task.id} already started")
+            return await self._running_tasks[task]
+
+        # If the task can be skipped directly
+        if not task.has_skip_task and task.should_be_skipped:
+            logging.debug(f"{self._run_id} - Task {task.id} should be skipped")
+            self._results[task] = TaskResult(state=State.SKIPPED)
+            return
+
+        # If the skip task needs to run first, run it
+        if task.needs_to_run_skip_task_first:
+            logging.debug(f"{self._run_id} - For task {task.id} waiting for skip task {task.skip_task.id}")
+            await self.run(task.skip_task)
+
+            if self._results[task.skip_task].value:
+                logging.debug(f"{self._run_id} - Task {task.id} should be skipped")
+                self._results[task] = TaskResult(state=State.SKIPPED)
+                return
+
+        # Run all upstream tasks in parallel
+        # TODO do not await all, but re-evaluate next step each time a task finishes
+        await asyncio.gather(*[asyncio.create_task(self.run(task))
+                               for task in task.upstream_tasks])
+
+        # If any upstream task failed, mark this task as failed
+        if any(self._results[upstream_task].state in [State.FAILED, State.UPSTREAM_FAILED]
+               for upstream_task in task.upstream_tasks):
+            logging.debug(f"{self._run_id} - Task {task.id} failed because of upstream task(s)")
+            self._results[task] = TaskResult(state=State.UPSTREAM_FAILED)
+            return
+
+        # If any upstream task was skipped, mark this task as skipped
+        if any(self._results[upstream_task].state in [State.SKIPPED, State.UPSTREAM_SKIPPED]
+               for upstream_task in task.upstream_tasks):
+            logging.debug(f"{self._run_id} - Task {task.id} skipped because of upstream task(s)")
+            self._results[task] = TaskResult(state=State.UPSTREAM_SKIPPED)
+            return
+
+        # Test again if this task should be skipped
+        if not task.needs_to_run_skip_task_first and task.has_skip_task and self._results[task.skip_task].value:
+            logging.debug(f"{self._run_id} - Task {task.id} should be skipped")
+            self._results[task] = TaskResult(state=State.SKIPPED)
+            return
+
+        # Run the task
+        run_kwargs_before = task.get_run_kwargs_before_execution()
+        run_kwargs_after = {kw: self._results[arg].value if isinstance(arg, Task) else arg
+                            for kw, arg in run_kwargs_before.items()}
+        try:
+            result = await task.run(**run_kwargs_after)
+            self._results[task] = TaskResult(value=result, state=State.SUCCEEDED)
+        except BaseException as e:
+            self._results[task] = TaskResult(error=e, state=State.FAILED)
+
+    def get_result(self, task: "Task[OutputType]") -> TaskResult[OutputType]:
+        """
+        Get the result of a task
+        """
+        return self._results[task]
 
 
 class Task(Generic[OutputType], ABC):
-    """Superclass of Task and FutureTaskResult"""
-
     def __init__(
-        self, id: str | None = None, wait_on: List["Task"] | None = None
-    ) -> None:
-        self._id = id or "<empty_id>"
-        self._is_independent = id is not None
+            self,
+            id: str,
+            *,
+            wait_on: List["Task[Any]"] | None = None,
+            skip: "Task[bool] | bool" = False,
+            check_skip_first: bool = False,
+    ):
+        """
+
+        :param id: The unique identifier of the task
+        :param wait_on: Upstream tasks that need to complete before
+        :param skip: If the outcome of this task is true, this task should be skipped
+        :param check_skip_first: If the "skip" task should be completed before the upstream tasks are run
+        """
+        self._id = id
         self._wait_on = wait_on or []
-        self._state = State.CREATED
-        self._result = Result[OutputType]()
+        self._skip = skip
+        self._check_skip_first = check_skip_first
+
+    @property
+    def id(self) -> str:
+        return self._id
+
+    @property
+    def needs_to_run_skip_task_first(self) -> bool:
+        return isinstance(self._skip, Task) and self._check_skip_first
+
+    @property
+    def has_skip_task(self) -> bool:
+        return isinstance(self._skip, Task)
+
+    @property
+    def should_be_skipped(self) -> bool:
+        if isinstance(self._skip, bool):
+            return self._skip
+        raise ValueError(f"Skip is not a bool for task {self._id}")
+
+    @property
+    def skip_task(self) -> "Task[bool]":
+        if isinstance(self._skip, Task):
+            return self._skip
+        raise ValueError(f"No skip task defined for task {self._id}")
 
     @abstractmethod
-    async def _run(self, *args, **kwargs) -> OutputType:
-        """Task to be executed"""
-        raise NotImplementedError()
+    async def run(self, *args, **kwargs) -> OutputType:
+        pass
 
-    def _get_run_kwargs(self) -> Dict[str, Any]:
-        """Matches kwarg names to class variables"""
-        arg_names = inspect.getfullargspec(self._run)[0]
+    def get_run_kwargs_before_execution(self) -> Dict[str, Any]:
+        """
+        Constructs _run() kwargs from class variables with matching names..
+
+        E.g., if _run() has the signature `async def _run(self, x: Task[int], y: int):`,
+        this method will return {'x': self.x, 'y': self.y}.
+        """
+        arg_names = inspect.getfullargspec(self.run)[0]
         if len(arg_names) == 1:
             return {}
 
         arg_names = arg_names[1:]  # Remove 'self'
         return {arg: getattr(self, arg) for arg in arg_names}
 
-    def _set_state(self, state: State):
-        if self._state != state and self._is_independent:
-            logging.debug(f"Task {self._id} moved to state {self._state}")
-        self._state = state
+    @property
+    def upstream_tasks(self) -> List["Task[Any]"]:
+        """
+        Gathers all upstream tasks that need to trigger before execution
+        """
+        return (
+                ([self._skip] if isinstance(self._skip, Task) else [])
+                + self._wait_on
+                + [
+                    arg for arg in self.get_run_kwargs_before_execution().values()
+                    if isinstance(arg, Task)
+                ])
 
-    @staticmethod
-    async def _get_results_for_tasks(run_id: UUID, tasks: Dict[str, "Task"]):
-        logging.debug(f"Getting results for tasks {tasks}")
-        async_tasks = []
-        for task in tasks.values():
-            async_tasks.append(asyncio.create_task(task.run(run_id)))
-        results = await asyncio.gather(*async_tasks)
+    def __eq__(self, another):
+        """Test for equality to use object as key in a set"""
+        return isinstance(another, Task) and self._id == another.id
 
-        return dict(zip(tasks.keys(), results))
-
-    async def run(self, run_id: UUID = uuid4()) -> Result[OutputType]:
-        self._set_state(State.WAITING)
-        run_kwargs = self._get_run_kwargs()
-        logging.debug(f"_run kwargs for {self._id}.run(): {run_kwargs}")
-        upstream_tasks_for_input: Dict[str, Task] = {
-            kw: arg for kw, arg in run_kwargs.items() if isinstance(arg, Task)
-        }
-        upstream_tasks_not_for_input: Dict[str, Task] = {
-            f"wait_on_{i}": task for i, task in enumerate(self._wait_on)
-        }
-        upstream_tasks: Dict[str, Task] = (
-            upstream_tasks_for_input | upstream_tasks_not_for_input
-        )
-        logging.debug(f"Upstream tasks for {self._id}.run(): {upstream_tasks}")
-        upstream_task_results: Dict[str, Result] = await self._get_results_for_tasks(
-            run_id, upstream_tasks
-        )
-
-        failed_upstream_tasks = {
-            k: v for k, v in upstream_task_results.items() if v.error is not None
-        }
-        if len(failed_upstream_tasks) > 0:
-            self._on_upstream_fail(failed_upstream_tasks)
-            return self._result
-
-        upstream_task_values = {k: v.value for k, v in upstream_task_results.items()}
-        final_run_kwargs = {
-            kw: upstream_task_values.get(kw, arg) for kw, arg in run_kwargs.items()
-        }
-        self._set_state(State.RUNNING)
-        try:
-            logging.debug(f"Kwargs for {self._id}.run(): {final_run_kwargs}")
-            self._result = Result[OutputType](value=await self._run(**final_run_kwargs))
-            self._set_state(State.SUCCEEDED)
-        except BaseException as e:
-            self._result = Result[OutputType](error=e)
-            self._set_state(State.FAILED)
-        return self._result
-
-    def run_sync(self, run_id: UUID = uuid4()) -> Result[OutputType]:
-        return asyncio.run(self.run(run_id))
-
-    def _on_upstream_fail(
-        self, failed_upstream_task_results: "Dict[str, Result[Any]]"
-    ) -> None:
-        self._result = Result[OutputType](
-            error=RunError(
-                f"Failing task {self._id} because inputs on parameters {list(failed_upstream_task_results.keys())} failed."
-            )
-        )
-        self._set_state(State.UPSTREAM_FAILED)
-
-    def result(self) -> Result[OutputType]:
-        """Wraps run"""
-        if self._state not in FINAL_STATES:
-            raise RunError(
-                f"Requested result on task {self._id}, but task was not ready yet"
-            )
-
-        return self._result
-
-    def transform(
-        self, transformation_func: Callable[[OutputType], TransformedType]
-    ) -> "TransformTask[OutputType, TransformedType]":
-        return TransformTask(self, transformation_func)
+    def __hash__(self):
+        """Hash function to use object as key in a set"""
+        return hash(self._id)
 
 
-class TransformTask(Generic[InputType, OutputType], Task[OutputType]):
-    def __init__(
-        self,
-        input: Task[InputType],
-        transformation_func: Callable[[InputType], OutputType],
-    ):
-        super().__init__()
-        self.upstream_task = input
-        self._transformation_func = transformation_func
-
-    async def _run(self, upstream_task: InputType) -> OutputType:
-        logging.debug(f"Running transformation on {upstream_task}")
-        return self._transformation_func(upstream_task)
-
-
-class FailableTask(Generic[OutputType], TransformTask[OutputType, OutputType]):
-    def __init__(
-        self,
-        input: Task[OutputType],
-        result_on_fail: OutputType,
-    ):
-        super().__init__(
-            input=input,
-            transformation_func=lambda x: x,
-        )
-        self._result_on_fail = result_on_fail
-
-    def _on_upstream_fail(
-        self, failed_upstream_task_results: Dict[str, Result[Any]]
-    ) -> None:
-        self._result = Result(value=self._result_on_fail)
-        self._state = State.SUCCEEDED
+TaskArg: TypeAlias = OutputType | Task[OutputType]

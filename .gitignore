@@ -265,3 +265,5 @@ pyrightconfig.json
 
 #MacOS
 .DS_Store
+#Test
+tests/__pycache__/*
