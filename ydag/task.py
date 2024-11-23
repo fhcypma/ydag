@@ -4,7 +4,7 @@ import logging
 from abc import abstractmethod, ABC
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Dict, TypeAlias
+from typing import Any, Dict, TypeAlias, Callable
 from typing import Generic, List
 from typing import TypeVar
 from uuid import uuid4
@@ -21,7 +21,42 @@ class State(Enum):
     UPSTREAM_SKIPPED = (7,)
 
 
+InputType = TypeVar("InputType")
 OutputType = TypeVar("OutputType")
+TransformedType = TypeVar("TransformedType")
+
+
+@dataclass
+class TaskTransform(Generic[InputType, OutputType]):
+    """Task with a transformation applied to the output"""
+
+    task: "Task[InputType] | TaskTransform[Any, InputType]"
+    transformation: Callable[[InputType], OutputType]
+
+    def apply(self, value: Any) -> OutputType:
+        """Apply the transformation to the value"""
+        if isinstance(self.task, Task):
+            return self.transformation(value)
+        return self.transformation(self.task.apply(value))
+
+    def transform(self, func: Callable[[OutputType], TransformedType]) -> "TaskTransform[OutputType, TransformedType]":
+        """Apply a transformation to the result of this task"""
+        return TaskTransform[OutputType, TransformedType](task=self, transformation=func)
+
+    @property
+    def upstream_task(self) -> "Task[Any]":
+        """Get the upstream task"""
+        if isinstance(self.task, TaskTransform):
+            return self.task.upstream_task
+        return self.task
+
+    def __eq__(self, another):
+        """Test for equality to use object as key in a set"""
+        return isinstance(another, TaskTransform) and self.__hash__() == another.__hash__()
+
+    def __hash__(self):
+        """Hash function to use object as key in a set"""
+        return hash(hash(self.transformation) + self.task.__hash__())
 
 
 @dataclass
@@ -100,12 +135,17 @@ class DagRun:
 
         # Run the task
         run_kwargs_before = task.get_run_kwargs_before_execution()
-        run_kwargs_after = {kw: self._results[arg].value if isinstance(arg, Task) else arg
-                            for kw, arg in run_kwargs_before.items()}
         try:
-            result = await task.run(**run_kwargs_after)
+            # If gather_result fails, it means that the transformation(s) fai(s);
+            # which should fail the current task
+            run_kwargs_after_task_run: Dict[str, Any] = {
+                kw: self._gather_value(arg) for kw, arg in run_kwargs_before.items()
+            }
+            result = await task.run(**run_kwargs_after_task_run)
+            logging.debug(f"{self._run_id} - Task {task.id} succeeded")
             self._results[task] = TaskResult(value=result, state=State.SUCCEEDED)
         except BaseException as e:
+            logging.warning(f"{self._run_id} - Task {task.id} failed")
             self._results[task] = TaskResult(error=e, state=State.FAILED)
 
     def get_result(self, task: "Task[OutputType]") -> TaskResult[OutputType]:
@@ -113,6 +153,19 @@ class DagRun:
         Get the result of a task
         """
         return self._results[task]
+
+    def _gather_value(self, task_arg: "TaskArg[OutputType]") -> OutputType | None:
+        """
+        Get the result of a task, applying transformations if necessary
+        """
+        if isinstance(task_arg, Task):
+            return self.get_result(task_arg).value
+        if isinstance(task_arg, TaskTransform):
+            task_result = self.get_result(task_arg.upstream_task)
+            transformed_value = task_arg.apply(task_result.value)
+            return transformed_value
+        logging.debug(f"{self._run_id} - Getting value {task_arg}")
+        return task_arg
 
 
 class Task(Generic[OutputType], ABC):
@@ -189,13 +242,24 @@ class Task(Generic[OutputType], ABC):
         """
         Gathers all upstream tasks that need to trigger before execution
         """
+        run_kwargs = self.get_run_kwargs_before_execution()
         return (
                 ([self._skip] if isinstance(self._skip, Task) else [])
                 + self._wait_on
                 + [
-                    arg for arg in self.get_run_kwargs_before_execution().values()
+                    arg for arg in run_kwargs.values()
                     if isinstance(arg, Task)
+                ]
+                + [
+                    arg.upstream_task for arg in run_kwargs.values()
+                    if isinstance(arg, TaskTransform)
                 ])
+
+    def transform(self, func: Callable[[OutputType], TransformedType]) -> TaskTransform[OutputType, TransformedType]:
+        """
+        Apply a transformation to the result of this task
+        """
+        return TaskTransform[OutputType, TransformedType](task=self, transformation=func)
 
     def __eq__(self, another):
         """Test for equality to use object as key in a set"""
@@ -206,5 +270,5 @@ class Task(Generic[OutputType], ABC):
         return hash(self._id)
 
 
-TaskArg: TypeAlias = OutputType | Task[OutputType]
+TaskArg: TypeAlias = OutputType | Task[OutputType] | TaskTransform[Any, OutputType]
 """Input type for task init parameters that accept static and dynamic values"""

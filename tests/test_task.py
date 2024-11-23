@@ -1,4 +1,5 @@
 import asyncio
+import logging
 
 from ydag.task import Task, TaskArg, DagRun, State
 
@@ -57,6 +58,14 @@ class TestTask:
         # Then the dependent task should have the correct dependencies
         assert task2.upstream_tasks == [task1]
 
+    def test_transformed_upstream_task(self):
+        # Given a task
+        task1 = ReturnOneTask("one")
+        # When a dependent task is created
+        task2 = AddOneTask("three", x=task1.transform(lambda x: x + 1))
+        # Then the dependent task should have the correct dependencies
+        assert task2.upstream_tasks == [task1]
+
     def test_wait_on_upstream(self):
         # Given a task
         task1 = ReturnOneTask("one")
@@ -91,6 +100,30 @@ class TestDagRun:
         # Then the result should be correct
         assert run.get_result(task1).value == 1
         assert run.get_result(task2).value == 2
+
+    def test_simple_dag_run_with_transformation(self):
+        logging.basicConfig(level=logging.DEBUG)
+        # Given two tasks
+        task1 = ReturnOneTask("one")
+        task2 = AddOneTask("three", x=task1.transform(lambda x: x + 1))
+        # When the tasks are run
+        run = DagRun()
+        asyncio.run(run.run(task2))
+        # Then the result should be correct
+        assert run.get_result(task1).value == 1
+        assert run.get_result(task2).value == 3
+
+    def test_simple_dag_run_with_linked_transformation(self):
+        logging.basicConfig(level=logging.DEBUG)
+        # Given two tasks
+        task1 = ReturnOneTask("one")
+        task2 = AddOneTask("five", x=task1.transform(lambda x: x + 1).transform(lambda x: x + 2))
+        # When the tasks are run
+        run = DagRun()
+        asyncio.run(run.run(task2))
+        # Then the result should be correct
+        assert run.get_result(task1).value == 1
+        assert run.get_result(task2).value == 5
 
     def test_simple_skip(self):
         # Given two tasks where the upstream one must be skipped
