@@ -1,5 +1,4 @@
 import asyncio
-import logging
 
 from ydag.task import Task, TaskArg, DagRun, State
 
@@ -102,8 +101,7 @@ class TestDagRun:
         assert run.get_result(task2).value == 2
 
     def test_simple_dag_run_with_transformation(self):
-        logging.basicConfig(level=logging.DEBUG)
-        # Given two tasks
+        # Given a task with a transformation
         task1 = ReturnOneTask("one")
         task2 = AddOneTask("three", x=task1.transform(lambda x: x + 1))
         # When the tasks are run
@@ -113,9 +111,20 @@ class TestDagRun:
         assert run.get_result(task1).value == 1
         assert run.get_result(task2).value == 3
 
+    def test_simple_dag_run_with_failing_transformation(self):
+        # Given a task with a failing transformation
+        task1 = ReturnOneTask("one")
+        task2 = AddOneTask("failing", x=task1.transform(lambda x: (_ for _ in ()).throw(Exception('Failing'))))
+        # When the tasks are run
+        run = DagRun()
+        asyncio.run(run.run(task2))
+        # Then the second task should have failed
+        task2_result = run.get_result(task2)
+        assert task2_result.value is None
+        assert "Failing" in str(task2_result.error)
+
     def test_simple_dag_run_with_linked_transformation(self):
-        logging.basicConfig(level=logging.DEBUG)
-        # Given two tasks
+        # Given a task with two transformations
         task1 = ReturnOneTask("one")
         task2 = AddOneTask("five", x=task1.transform(lambda x: x + 1).transform(lambda x: x + 2))
         # When the tasks are run
