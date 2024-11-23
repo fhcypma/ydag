@@ -125,6 +125,7 @@ class Task(Generic[OutputType], ABC):
             check_skip_first: bool = False,
     ):
         """
+        Runnable node in a DAG.
 
         :param id: The unique identifier of the task
         :param wait_on: Upstream tasks that need to complete before
@@ -138,24 +139,29 @@ class Task(Generic[OutputType], ABC):
 
     @property
     def id(self) -> str:
+        """Unique identifier of the task"""
         return self._id
 
     @property
     def needs_to_run_skip_task_first(self) -> bool:
+        """If the skip task should be completed before the upstream tasks are run"""
         return isinstance(self._skip, Task) and self._check_skip_first
 
     @property
     def has_skip_task(self) -> bool:
+        """If an upstream task defined whether this task should be skipped"""
         return isinstance(self._skip, Task)
 
     @property
     def should_be_skipped(self) -> bool:
+        """If this task should be skipped"""
         if isinstance(self._skip, bool):
             return self._skip
         raise ValueError(f"Skip is not a bool for task {self._id}")
 
     @property
     def skip_task(self) -> "Task[bool]":
+        """Get upstream task that defines whether this task should be skipped"""
         if isinstance(self._skip, Task):
             return self._skip
         raise ValueError(f"No skip task defined for task {self._id}")
@@ -201,3 +207,4 @@ class Task(Generic[OutputType], ABC):
 
 
 TaskArg: TypeAlias = OutputType | Task[OutputType]
+"""Input type for task init parameters that accept static and dynamic values"""
