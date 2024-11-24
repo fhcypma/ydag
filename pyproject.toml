@@ -34,8 +34,18 @@ commitizen = "^3.29.1"
 
 [tool.poetry.group.test.dependencies]
 pytest = "*"
+pytest-cov = "*"
 mypy = "*"
 networkx-stubs = "*"
+
+[tool.pytest.ini_options]
+addopts = "--cov=. --cov-fail-under=80"
+
+[tool.coverage.run]
+omit = [
+    "ydag/deprecated/*",
+    "tests/deprecated/*",
+    ]
 
 [build-system]
 requires = ["poetry-core"]
