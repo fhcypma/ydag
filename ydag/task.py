@@ -40,7 +40,7 @@ class DagRun:
 
     def __init__(self):
         self._run_id = uuid4()
-        self._running_tasks: Dict[Task, Any] = {}
+        self._running_tasks: Dict[Task, asyncio.Task[Any]] = {}
         self._results: Dict[Task, TaskResult] = {}
 
     async def run(self, task: "Task[OutputType]") -> None:
@@ -53,6 +53,8 @@ class DagRun:
         if task in self._results.keys():
             logging.debug(f"{self._run_id} - Task {task.id} already completed")
             return
+
+        logging.debug(self._running_tasks.keys())
 
         # Task was already started
         if task in self._running_tasks.keys():
@@ -105,7 +107,8 @@ class DagRun:
         run_kwargs_after = {kw: self._results[arg].value if isinstance(arg, Task) else arg
                             for kw, arg in run_kwargs_before.items()}
         try:
-            result = await task.run(**run_kwargs_after)
+            self._running_tasks[task] = asyncio.create_task(task.run(**run_kwargs_after))
+            result = await self._running_tasks[task]
             self._results[task] = TaskResult(value=result, state=State.SUCCEEDED)
         except BaseException as e:
             self._results[task] = TaskResult(error=e, state=State.FAILED)
@@ -154,7 +157,7 @@ class Task(Generic[OutputType], ABC):
     def should_be_skipped(self) -> bool:
         if isinstance(self._skip, bool):
             return self._skip
-        raise ValueError(f"Skip is not a bool for task {self._id}")
+        raise ValueError(f"Skip is not a bool for task {self._id}")  # pragma: no cover
 
     @property
     def skip_task(self) -> "Task[bool]":
