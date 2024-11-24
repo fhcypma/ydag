@@ -92,6 +92,17 @@ class TestDagRun:
         assert run.get_result(task1).value == 1
         assert run.get_result(task2).value == 2
 
+    def test_simple_dag_run_with_transformation(self):
+        # Given two tasks
+        task1 = ReturnOneTask("one")
+        task2 = AddOneTask("four", x=task1.transform(lambda x: x + 1).transform(lambda x: x + 1))
+        # When the tasks are run
+        run = DagRun()
+        asyncio.run(run.run(task2))
+        # Then the result should be correct
+        assert run.get_result(task1).value == 1
+        assert run.get_result(task2).value == 4
+
     def test_simple_skip(self):
         # Given two tasks where the upstream one must be skipped
         task1 = ReturnOneTask("one", skip=True)

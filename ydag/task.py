@@ -4,7 +4,7 @@ import logging
 from abc import abstractmethod, ABC
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Dict, TypeAlias
+from typing import Any, Dict, TypeAlias, Callable
 from typing import Generic, List
 from typing import TypeVar
 from uuid import uuid4
@@ -21,7 +21,9 @@ class State(Enum):
     UPSTREAM_SKIPPED = (7,)
 
 
+InputType = TypeVar("InputType")
 OutputType = TypeVar("OutputType")
+TransformedType = TypeVar("TransformedType")
 
 
 @dataclass
@@ -198,6 +200,26 @@ class Task(Generic[OutputType], ABC):
     def __hash__(self):
         """Hash function to use object as key in a set"""
         return hash(self._id)
+
+    def transform(self, func: Callable[[OutputType], TransformedType]) -> "TransformTask[OutputType, TransformedType]":
+        """Create new Task that transforms the result value of this task"""
+        return TransformTask(self, func)
+
+
+class TransformTask(Generic[InputType, OutputType], Task[OutputType]):
+    def __init__(
+            self,
+            upstream_task: Task[InputType],
+            func: Callable[[InputType], OutputType],
+    ):
+        task_id = f"{upstream_task.id}_tf{hash(func)}"
+        super().__init__(task_id)
+        self.upstream_task = upstream_task
+        self._func = func
+
+    async def run(self, upstream_task: InputType) -> OutputType:
+        """Apply transformation function to upstream task result value"""
+        return self._func(upstream_task)
 
 
 TaskArg: TypeAlias = OutputType | Task[OutputType]
