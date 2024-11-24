@@ -8,6 +8,11 @@ class ReturnOneTask(Task[int]):
         return 1
 
 
+class FailTask(Task[int]):
+    async def run(self) -> int:
+        raise Exception("Not giving the int!")
+
+
 class ReturnTrueTask(Task[bool]):
     async def run(self) -> bool:
         return True
@@ -100,6 +105,24 @@ class TestDagRun:
         assert run.get_result(task1).value == 1
         assert run.get_result(task2).value == 2
 
+    def test_simple_failing_dag_run(self):
+        # Given a task that fails
+        task1 = FailTask("one")
+        # And a dependent one
+        task2 = AddOneTask("two", x=task1)
+        # When the tasks are run
+        run = DagRun()
+        asyncio.run(run.run(task2))
+        # Then the tasks should have failed
+        task1_result = run.get_result(task1)
+        assert task1_result.value is None
+        assert "Not giving the int!" in str(task1_result.error)
+        assert task1_result.state == State.FAILED
+        task2_result = run.get_result(task2)
+        assert task2_result.value is None
+        assert task2_result.error is None
+        assert task2_result.state == State.UPSTREAM_FAILED
+
     def test_simple_dag_run_with_transformation(self):
         # Given a task with a transformation
         task1 = ReturnOneTask("one")
@@ -122,6 +145,18 @@ class TestDagRun:
         task2_result = run.get_result(task2)
         assert task2_result.value is None
         assert "Failing" in str(task2_result.error)
+        assert task2_result.state == State.FAILED
+
+    def test_simple_dag_run_with_alternative(self):
+        # Given a task with a failing transformation
+        task1 = FailTask("fail")
+        task2 = AddOneTask("two", x=task1.or_else(1))
+        # When the tasks are run
+        run = DagRun()
+        asyncio.run(run.run(task2))
+        # Then the result should be correct
+        assert run.get_result(task1).value == 1
+        assert run.get_result(task2).value == 2
 
     def test_simple_dag_run_with_linked_transformation(self):
         # Given a task with two transformations

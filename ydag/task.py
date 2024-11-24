@@ -31,17 +31,24 @@ class TaskTransform(Generic[InputType, OutputType]):
     """Task with a transformation applied to the output"""
 
     task: "Task[InputType] | TaskTransform[Any, InputType]"
-    transformation: Callable[[InputType], OutputType]
+    transformation: Callable[[InputType], OutputType] | None = None
+    alternative: OutputType | None = None
 
-    def apply(self, value: Any) -> OutputType:
-        """Apply the transformation to the value"""
-        if isinstance(self.task, Task):
-            return self.transformation(value)
-        return self.transformation(self.task.apply(value))
+    def apply(self, upstream_result: "TaskResult[Any]") -> "TaskResult[OutputType]":
+        """Apply the transformation to the task result"""
+        if isinstance(self.task, TaskTransform):
+            upstream_result = self.task.apply(upstream_result)
+        if self.alternative is not None and upstream_result.error:
+            return TaskResult[OutputType](value=self.alternative)
+        return TaskResult[OutputType](value=self.transformation(upstream_result.value))  # type: ignore # TODO fix
 
     def transform(self, func: Callable[[OutputType], TransformedType]) -> "TaskTransform[OutputType, TransformedType]":
         """Apply a transformation to the result of this task"""
         return TaskTransform[OutputType, TransformedType](task=self, transformation=func)
+
+    def or_else(self, alternative: OutputType) -> "TaskTransform[OutputType, OutputType]":
+        """Apply a default value if the task fails"""
+        return TaskTransform[OutputType, OutputType](task=self, alternative=alternative)
 
     @property
     def upstream_task(self) -> "Task[Any]":
@@ -113,6 +120,18 @@ class DagRun:
         await asyncio.gather(*[asyncio.create_task(self.run(task))
                                for task in task.upstream_tasks])
 
+        # Gather the results of the upstream tasks
+        run_kwargs_before = task.get_run_kwargs_before_execution()
+        try:
+            # If gather_result fails, it means that the transformation(s) fai(s);
+            # which should fail the current task
+            run_kwargs_after_task_run: Dict[str, Any] = {
+                kw: self._gather_value(arg) for kw, arg in run_kwargs_before.items()
+            }
+        except BaseException as e:
+            logging.warning(f"{self._run_id} - Task {task.id} failed")
+            self._results[task] = TaskResult(error=e, state=State.FAILED)
+
         # If any upstream task failed, mark this task as failed
         if any(self._results[upstream_task].state in [State.FAILED, State.UPSTREAM_FAILED]
                for upstream_task in task.upstream_tasks):
@@ -134,13 +153,7 @@ class DagRun:
             return
 
         # Run the task
-        run_kwargs_before = task.get_run_kwargs_before_execution()
         try:
-            # If gather_result fails, it means that the transformation(s) fai(s);
-            # which should fail the current task
-            run_kwargs_after_task_run: Dict[str, Any] = {
-                kw: self._gather_value(arg) for kw, arg in run_kwargs_before.items()
-            }
             result = await task.run(**run_kwargs_after_task_run)
             logging.debug(f"{self._run_id} - Task {task.id} succeeded")
             self._results[task] = TaskResult(value=result, state=State.SUCCEEDED)
@@ -162,7 +175,7 @@ class DagRun:
             return self.get_result(task_arg).value
         if isinstance(task_arg, TaskTransform):
             task_result = self.get_result(task_arg.upstream_task)
-            transformed_value = task_arg.apply(task_result.value)
+            transformed_value = task_arg.apply(task_result).value
             return transformed_value
         logging.debug(f"{self._run_id} - Getting value {task_arg}")
         return task_arg
@@ -260,6 +273,10 @@ class Task(Generic[OutputType], ABC):
         Apply a transformation to the result of this task
         """
         return TaskTransform[OutputType, TransformedType](task=self, transformation=func)
+
+    def or_else(self, alternative: OutputType) -> "TaskTransform[OutputType, OutputType]":
+        """Apply a default value if the task fails"""
+        return TaskTransform[OutputType, OutputType](task=self, alternative=alternative)
 
     def __eq__(self, another):
         """Test for equality to use object as key in a set"""
