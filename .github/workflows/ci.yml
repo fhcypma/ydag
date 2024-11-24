@@ -26,14 +26,6 @@ jobs:
       - name: Install dependencies
         run: |
           poetry install
-      - uses: actions/cache@v4
-        with:
-          path: ~/.cache/pre-commit
-          key: >
-            ${{ format('pre-commit-{0}-{1}',
-            steps.setup-python.outputs.python-version,
-            hashFiles('.pre-commit-config.yaml')
-            ) }}
       - name: Pre-commit
         run: |
           poetry run pre-commit install
