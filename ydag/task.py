@@ -4,7 +4,7 @@ import logging
 from abc import abstractmethod, ABC
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Dict, TypeAlias
+from typing import Any, Dict, TypeAlias, Callable
 from typing import Generic, List
 from typing import TypeVar
 from uuid import uuid4
@@ -21,7 +21,9 @@ class State(Enum):
     UPSTREAM_SKIPPED = (7,)
 
 
+InputType = TypeVar("InputType")
 OutputType = TypeVar("OutputType")
+TransformedType = TypeVar("TransformedType")
 
 
 @dataclass
@@ -38,7 +40,7 @@ class DagRun:
 
     def __init__(self):
         self._run_id = uuid4()
-        self._running_tasks: Dict[Task, Any] = {}
+        self._running_tasks: Dict[Task, asyncio.Task[Any]] = {}
         self._results: Dict[Task, TaskResult] = {}
 
     async def run(self, task: "Task[OutputType]") -> None:
@@ -103,7 +105,8 @@ class DagRun:
         run_kwargs_after = {kw: self._results[arg].value if isinstance(arg, Task) else arg
                             for kw, arg in run_kwargs_before.items()}
         try:
-            result = await task.run(**run_kwargs_after)
+            self._running_tasks[task] = asyncio.create_task(task.run(**run_kwargs_after))
+            result = await self._running_tasks[task]
             self._results[task] = TaskResult(value=result, state=State.SUCCEEDED)
         except BaseException as e:
             self._results[task] = TaskResult(error=e, state=State.FAILED)
@@ -152,7 +155,7 @@ class Task(Generic[OutputType], ABC):
     def should_be_skipped(self) -> bool:
         if isinstance(self._skip, bool):
             return self._skip
-        raise ValueError(f"Skip is not a bool for task {self._id}")
+        raise ValueError(f"Skip is not a bool for task {self._id}")  # pragma: no cover
 
     @property
     def skip_task(self) -> "Task[bool]":
@@ -198,6 +201,26 @@ class Task(Generic[OutputType], ABC):
     def __hash__(self):
         """Hash function to use object as key in a set"""
         return hash(self._id)
+
+    def transform(self, func: Callable[[OutputType], TransformedType]) -> "TransformTask[OutputType, TransformedType]":
+        """Create new Task that transforms the result value of this task"""
+        return TransformTask(self, func)
+
+
+class TransformTask(Generic[InputType, OutputType], Task[OutputType]):
+    def __init__(
+            self,
+            upstream_task: Task[InputType],
+            func: Callable[[InputType], OutputType],
+    ):
+        task_id = f"{upstream_task.id}_tf{hash(func)}"
+        super().__init__(task_id)
+        self.upstream_task = upstream_task
+        self._func = func
+
+    async def run(self, upstream_task: InputType) -> OutputType:
+        """Apply transformation function to upstream task result value"""
+        return self._func(upstream_task)
 
 
 TaskArg: TypeAlias = OutputType | Task[OutputType]
