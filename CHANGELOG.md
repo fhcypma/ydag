@@ -1,6 +1,53 @@
 # CHANGELOG
 
 
+## v0.4.0 (2024-11-24)
+
+### Continuous Integration
+
+* ci: re-using pre-commit env ([`f584919`](https://github.com/fhcypma/ydag/commit/f584919b719bd04ed478aa3ec14b2cf159dcff42))
+
+### Features
+
+* feat: implemented parallel running in dagrun ([`be84108`](https://github.com/fhcypma/ydag/commit/be84108bf86de54f185ca63468b57d9b2558d444))
+
+* feat: added .transform() on task ([`65c7427`](https://github.com/fhcypma/ydag/commit/65c7427125d62a5703f4a25b7ec60ce71475a568))
+
+### Testing
+
+* test: 100% test coverage ([`9de3a20`](https://github.com/fhcypma/ydag/commit/9de3a20e8f5d9a041b02104adbc65e7043c34aed))
+
+* test: 100% test coverage ([`7765bf7`](https://github.com/fhcypma/ydag/commit/7765bf77fb5a66977ce298fad60b0d3839f0e5d7))
+
+* test: add coverage ([`0111d64`](https://github.com/fhcypma/ydag/commit/0111d6459aa7b468ba842151169ec359d2168609))
+
+### Unknown
+
+* Merge pull request #9 from fhcypma/feature/transform-task
+
+Feature/transform task ([`0b16d3f`](https://github.com/fhcypma/ydag/commit/0b16d3f06440bb756ea6d7d4ed0f32969d85b467))
+
+* Revert "Feature/transform task (#7)" (#8)
+
+This reverts commit bb7066d25e5074f455e574099ed5a6e29fe96ed7. ([`e95b67a`](https://github.com/fhcypma/ydag/commit/e95b67a3ba695b4f5501255faa516fd90a41e691))
+
+* Feature/transform task (#7)
+
+* feat: added .transform() on task
+
+* test: add coverage
+
+* feat: implemented parallel running in dagrun
+
+* test: 100% test coverage
+
+* ci: re-using pre-commit env
+
+---------
+
+Co-authored-by: Frank Ypma <frank.ypma@ypma-data.nl> ([`bb7066d`](https://github.com/fhcypma/ydag/commit/bb7066d25e5074f455e574099ed5a6e29fe96ed7))
+
+
 ## v0.3.0 (2024-11-17)
 
 ### Chores
