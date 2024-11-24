@@ -54,8 +54,6 @@ class DagRun:
             logging.debug(f"{self._run_id} - Task {task.id} already completed")
             return
 
-        logging.debug(self._running_tasks.keys())
-
         # Task was already started
         if task in self._running_tasks.keys():
             logging.debug(f"{self._run_id} - Task {task.id} already started")

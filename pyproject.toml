@@ -40,9 +40,9 @@ mypy = "*"
 networkx-stubs = "*"
 
 [tool.pytest.ini_options]
-log_cli = true
-log_cli_level = "DEBUG"
-addopts = "--cov=. --cov-fail-under=80 --cov-report=html"
+#log_cli = true
+#log_cli_level = "DEBUG"
+addopts = "-vvv --cov=. --cov-fail-under=80 --cov-report=html"
 
 [tool.coverage.run]
 omit = [
