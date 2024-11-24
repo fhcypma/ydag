@@ -35,16 +35,26 @@ commitizen = "^3.29.1"
 [tool.poetry.group.test.dependencies]
 pytest = "*"
 pytest-cov = "*"
+pytest-asyncio = "*"
 mypy = "*"
 networkx-stubs = "*"
 
 [tool.pytest.ini_options]
-addopts = "--cov=. --cov-fail-under=80"
+log_cli = true
+log_cli_level = "DEBUG"
+addopts = "--cov=. --cov-fail-under=80 --cov-report=html"
 
 [tool.coverage.run]
 omit = [
     "ydag/deprecated/*",
     "tests/deprecated/*",
+    ]
+
+[tool.coverage.report]
+exclude_lines = [
+    "@abstractmethod",
+    "@abc.abstractmethod",
+    "pragma: no cover",
     ]
 
 [build-system]
